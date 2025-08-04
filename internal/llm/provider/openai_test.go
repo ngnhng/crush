@@ -154,3 +154,42 @@ func TestOpenAIClient429RateLimitError(t *testing.T) {
 		t.Errorf("Expected shouldRetry to return nil error for rate_limit_exceeded, but got: %v", err)
 	}
 }
+
+func TestOpenAIClient429MessageBasedQuotaDetection(t *testing.T) {
+	// Create test client
+	client := &openaiClient{
+		providerOptions: providerClientOptions{
+			modelType:     config.SelectedModelTypeLarge,
+			apiKey:        "test-key",
+			systemMessage: "test",
+			config: config.ProviderConfig{
+				ID:     "test-openai",
+				APIKey: "test-key",
+			},
+			model: func(config.SelectedModelType) catwalk.Model {
+				return catwalk.Model{
+					ID:   "test-model",
+					Name: "test-model",
+				}
+			},
+		},
+	}
+
+	// Test quota error detection via message content (not just type)
+	apiErr := &openai.Error{
+		StatusCode: 429,
+		Message:    "You exceeded your current quota, please check your plan and billing details.",
+		Type:       "some_other_type", // Different type but quota message
+	}
+
+	retry, _, err := client.shouldRetry(1, apiErr)
+	if retry {
+		t.Error("Expected shouldRetry to return false for message-based quota detection, but got true")
+	}
+	if err == nil {
+		t.Error("Expected shouldRetry to return an error for message-based quota detection, but got nil")
+	}
+	if err != nil && !strings.Contains(err.Error(), "quota") {
+		t.Errorf("Expected error message to mention quota, got: %v", err)
+	}
+}

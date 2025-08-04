@@ -501,11 +501,21 @@ func (o *openaiClient) shouldRetry(attempts int, err error) (bool, int64, error)
 			return true, 0, nil
 		}
 
-		if apiErr.StatusCode != 429 && apiErr.StatusCode != 500 {
+		// Check for 429 errors
+		if apiErr.StatusCode == 429 {
+			// Check if this is an insufficient quota error (permanent)
+			if apiErr.Type == "insufficient_quota" || strings.Contains(apiErr.Message, "exceeded your current quota") {
+				return false, 0, fmt.Errorf("OpenAI quota exceeded: %s. Please check your plan and billing details", apiErr.Message)
+			}
+			// Other 429 errors (rate limiting) should retry with backoff
+		} else if apiErr.StatusCode != 500 {
 			return false, 0, err
 		}
 
-		retryAfterValues = apiErr.Response.Header.Values("Retry-After")
+		// Safely access response headers if response exists
+		if apiErr.Response != nil {
+			retryAfterValues = apiErr.Response.Header.Values("Retry-After")
+		}
 	}
 
 	if apiErr != nil {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"os"
 	"sync"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/charmbracelet/crush/internal/llm/agent"
 	"github.com/charmbracelet/crush/internal/log"
 	"github.com/charmbracelet/crush/internal/pubsub"
+	"github.com/charmbracelet/x/term"
 
 	"github.com/charmbracelet/crush/internal/lsp"
 	"github.com/charmbracelet/crush/internal/message"
@@ -51,6 +53,9 @@ type App struct {
 	// global context and cleanup functions
 	globalCtx    context.Context
 	cleanupFuncs []func()
+
+	// terminal state management
+	terminalState *term.State
 }
 
 // New initializes a new applcation instance.
@@ -81,6 +86,16 @@ func New(ctx context.Context, conn *sql.DB, cfg *config.Config) (*App, error) {
 		events:          make(chan tea.Msg, 100),
 		serviceEventsWG: &sync.WaitGroup{},
 		tuiWG:           &sync.WaitGroup{},
+	}
+
+	// Capture initial terminal state for restoration on exit
+	// This is particularly important for keyboard enhancements mode
+	if term.IsTerminal(os.Stdin.Fd()) {
+		if initialState, err := term.GetState(os.Stdin.Fd()); err == nil {
+			app.terminalState = initialState
+		} else {
+			slog.Debug("Failed to capture initial terminal state", "error", err)
+		}
 	}
 
 	app.setupEvents()
@@ -339,6 +354,14 @@ func (app *App) Shutdown() {
 	for _, cleanup := range app.cleanupFuncs {
 		if cleanup != nil {
 			cleanup()
+		}
+	}
+
+	// Restore terminal state to fix issues like ctrl+c not working after exit
+	// This is crucial for properly restoring keyboard enhancements mode
+	if app.terminalState != nil && term.IsTerminal(os.Stdin.Fd()) {
+		if err := term.Restore(os.Stdin.Fd(), app.terminalState); err != nil {
+			slog.Debug("Failed to restore terminal state", "error", err)
 		}
 	}
 }
